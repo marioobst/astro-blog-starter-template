@@ -5,6 +5,112 @@ import Footer from '../components/Footer.astro';
 import { SITE_TITLE, SITE_DESCRIPTION } from '../consts';
 ---
 
+<?php
+
+set_time_limit(60);
+
+function normalizeUrl($url) {
+    $url = trim($url);
+    if (!preg_match("~^https?://~", $url)) {
+        $url = "https://" . $url;
+    }
+    return rtrim($url, '/');
+}
+
+function getLinks($url, $domain) {
+    $html = @file_get_contents($url);
+
+    if (!$html) {
+        return [];
+    }
+
+    preg_match_all('/href=["\'](.*?)["\']/i', $html, $matches);
+
+    $links = [];
+
+    foreach ($matches[1] as $link) {
+
+        if (strpos($link, '#') === 0 ||
+            strpos($link, 'mailto:') === 0 ||
+            strpos($link, 'tel:') === 0) {
+            continue;
+        }
+
+        if (strpos($link, 'http') !== 0) {
+            $link = rtrim($domain, '/') . '/' . ltrim($link, '/');
+        }
+
+        $parsed = parse_url($link);
+
+        if (!isset($parsed['host'])) {
+            continue;
+        }
+
+        if ($parsed['host'] === parse_url($domain, PHP_URL_HOST)) {
+            $links[] = strtok($link, '#');
+        }
+    }
+
+    return array_unique($links);
+}
+
+$sitemap = "";
+$error = "";
+
+if (!empty($_POST['url'])) {
+
+    $startUrl = normalizeUrl($_POST['url']);
+
+    $visited = [];
+    $toVisit = [$startUrl];
+    $maxPages = 100;
+
+    while (!empty($toVisit) && count($visited) < $maxPages) {
+
+        $current = array_shift($toVisit);
+
+        if (in_array($current, $visited)) {
+            continue;
+        }
+
+        $visited[] = $current;
+
+        $links = getLinks($current, $startUrl);
+
+        foreach ($links as $link) {
+            if (!in_array($link, $visited) &&
+                !in_array($link, $toVisit)) {
+                $toVisit[] = $link;
+            }
+        }
+    }
+
+    if (!empty($visited)) {
+
+        $xml = new SimpleXMLElement(
+            '<?xml version="1.0" encoding="UTF-8"?><urlset/>'
+        );
+
+        $xml->addAttribute(
+            'xmlns',
+            'http://www.sitemaps.org/schemas/sitemap/0.9'
+        );
+
+        foreach ($visited as $page) {
+            $url = $xml->addChild('url');
+            $url->addChild('loc', htmlspecialchars($page));
+        }
+
+        $sitemap = $xml->asXML();
+
+    } else {
+        $error = "Website konnte nicht gelesen werden.";
+    }
+}
+?>
+
+
+
 <!doctype html>
 <html lang="en">
 	<head>
@@ -14,37 +120,36 @@ import { SITE_TITLE, SITE_DESCRIPTION } from '../consts';
 		<Header />
 		<main>
 			<h1>👉 obst.party</h1>
-			<p>
-				Welcome to the official <a href="https://astro.build/">Astro</a> blog starter template. This
-				template serves as a lightweight, minimally-styled starting point for anyone looking to build
-				a personal website, blog, or portfolio with Astro. Obst.Party
-			</p>
-			<p>
-				This template comes with a few integrations already configured in your
-				<code>astro.config.mjs</code> file. You can customize your setup with
-				<a href="https://astro.build/integrations">Astro Integrations</a> to add tools like Tailwind,
-				React, or Vue to your project.
-			</p>
-			<p>Here are a few ideas on how to get started with the template:</p>
-			<ul>
-				<li>Edit this page in <code>src/pages/index.astro</code></li>
-				<li>Edit the site header items in <code>src/components/Header.astro</code></li>
-				<li>Add your name to the footer in <code>src/components/Footer.astro</code></li>
-				<li>Check out the included blog posts in <code>src/content/blog/</code></li>
-				<li>Customize the blog post page layout in <code>src/layouts/BlogPost.astro</code></li>
-			</ul>
-			<p>
-				Have fun! If you get stuck, remember to <a href="https://docs.astro.build/"
-					>read the docs
-				</a> or <a href="https://astro.build/chat">join us on Discord</a> to ask questions.
-			</p>
-			<p>
-				Looking for a blog template with a bit more personality? Check out <a
-					href="https://github.com/Charca/astro-blog-template"
-					>astro-blog-template
-				</a> by <a href="https://twitter.com/Charca">Maxi Ferreira</a>.
-			</p>
+			<h2>XML Sitemap Generator</h2>
 		</main>
-		<Footer />
-	</body>
+<form method="post">
+    <input
+        type="text"
+        name="url"
+        placeholder="https://example.com"
+        required
+    >
+    <button type="submit">
+        Create Sitemap
+    </button>
+</form>
+
+<?php if($error): ?>
+<p><?= htmlspecialchars($error) ?></p>
+<?php endif; ?>
+
+<?php if($sitemap): ?>
+
+<h3>Completed Sitemap</h3>
+
+<a href="data:text/xml;charset=utf-8,<?= urlencode($sitemap) ?>"
+   download="sitemap.xml">
+   Download Sitemap
+</a>
+
+<textarea readonly><?= htmlspecialchars($sitemap) ?></textarea>
+
+<?php endif; ?>
+
+</body>
 </html>
